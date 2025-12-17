@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mini Among Us with Sabotage</title>
+<style>
+  body {background:#111;color:#0ff;text-align:center;font-family:sans-serif;}
+  canvas {background:#000;border:2px solid #0ff;margin:1rem auto;display:block;}
+  #meeting {display:none;background:#222;color:#0ff;padding:1rem;}
+  #taskOverlay {display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#000c;color:#0ff;text-align:center;padding-top:50px;}
+  button {margin:.25rem;padding:.5rem 1rem;}
+</style>
+</head>
+<body>
+<h1>Mini Among Us</h1>
+<p>Move with arrow keys. Press SPACE near the cafe table, a body, or inside a room to act.</p>
+<canvas id="gameCanvas" width="600" height="400"></canvas>
+<div id="meeting"></div>
+<div id="taskOverlay">
+  <h2 id="taskTitle"></h2>
+  <div id="taskContent"></div>
+  <button onclick="closeTask()">Close</button>
+</div>
+
+<script>
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+
+let rooms=[
+  {x:50,y:50,w:150,h:100,name:"Cafeteria",task:false},
+  {x:250,y:50,w:150,h:100,name:"MedBay",task:true,taskType:"keypad"},
+  {x:450,y:50,w:100,h:100,name:"Electrical",task:true,taskType:"wires"},
+  {x:150,y:200,w:150,h:100,name:"Storage",task:true,taskType:"switches"},
+  {x:350,y:200,w:150,h:100,name:"Admin",task:true,taskType:"keypad"}
+];
+
+let players=[
+  {name:"Red",x:80,y:80,color:"red",alive:true}, // you
+  {name:"Blue",x:150,y:80,color:"blue",alive:true},
+  {name:"Green",x:220,y:80,color:"green",alive:true},
+  {name:"Yellow",x:290,y:80,color:"yellow",alive:true}
+];
+let impostorIndex=Math.floor(Math.random()*players.length);
+let player=players[0]; // control Red
+let bodies=[];
+let tasksDone=0;
+
+// sabotage state
+let currentSabotage=null;
+let sabotageTimer=0;
+
+function draw(){
+  ctx.clearRect(0,0,600,400);
+  rooms.forEach(r=>{
+    ctx.strokeStyle="#0ff";ctx.strokeRect(r.x,r.y,r.w,r.h);
+    ctx.fillStyle="#0ff";ctx.fillText(r.name,r.x+10,r.y+15);
+    if(r.task){ctx.fillStyle="#f0f";ctx.fillRect(r.x+r.w-20,r.y+r.h-20,15,15);}
+  });
+  players.forEach(p=>{if(p.alive){ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,20,20);}});
+  bodies.forEach(b=>{ctx.fillStyle="#999";ctx.fillRect(b.x,b.y,20,20);ctx.fillStyle="#fff";ctx.fillText("X",b.x+5,b.y+15);});
+  ctx.fillStyle="#0ff";ctx.fillText(`Tasks done: ${tasksDone}/${rooms.filter(r=>r.taskType).length}`,10,390);
+  if(currentSabotage){
+    ctx.fillStyle="#f00";
+    ctx.fillText(`Sabotage: ${currentSabotage} (${sabotageTimer})`,400,390);
+  }
+}
+
+function moveImpostor(){
+  let imp=players[impostorIndex];
+  if(!imp.alive)return;
+  imp.x+=Math.floor(Math.random()*21-10);
+  imp.y+=Math.floor(Math.random()*21-10);
+  imp.x=Math.max(0,Math.min(580,imp.x));
+  imp.y=Math.max(0,Math.min(380,imp.y));
+  // chance to kill
+  players.forEach((p,i)=>{
+    if(i!==impostorIndex && p.alive && Math.random()<0.01 && Math.abs(p.x-imp.x)<20 && Math.abs(p.y-imp.y)<20){
+      p.alive=false;
+      bodies.push({x:p.x,y:p.y,name:p.name});
+    }
+  });
+}
+
+function maybeSabotage(){
+  if(currentSabotage) return;
+  if(Math.random()<0.01){ // chance each tick
+    let types=["lights","reactor","oxygen"];
+    currentSabotage=types[Math.floor(Math.random()*types.length)];
+    sabotageTimer=20;
+    alert("Sabotage! "+currentSabotage+" needs fixing!");
+  }
+}
+
+function callMeeting(){
+  document.getElementById("meeting").style.display="block";
+  let html="<h2>Meeting!</h2>";
+  players.forEach((p,i)=>{
+    if(p.alive){html+=`<button onclick="vote(${i})">${p.name}</button>`;}
+  });
+  document.getElementById("meeting").innerHTML=html;
+}
+
+function vote(i){
+  if(i===impostorIndex){alert(players[i].name+" was the impostor! Crew wins!");reset();}
+  else{alert(players[i].name+" was not the impostor... Game continues.");}
+  document.getElementById("meeting").style.display="none";
+}
+
+function reset(){
+  tasksDone=0;
+  rooms.forEach(r=>{if(r.name!=="Cafeteria")r.task=true;});
+  players.forEach(p=>{p.alive=true;p.x=Math.random()*500;p.y=Math.random()*300;});
+  impostorIndex=Math.floor(Math.random()*players.length);
+  bodies=[];
+  currentSabotage=null;
+}
+
+// --- Tasks ---
+function startTask(room){
+  document.getElementById("taskOverlay").style.display="block";
+  document.getElementById("taskTitle").textContent="Task in "+room.name;
+  const content=document.getElementById("taskContent");
+  content.innerHTML="";
+  
+  if(room.taskType==="keypad"){
+    let code=Math.floor(1000+Math.random()*9000).toString();
+    content.innerHTML=`<p>Enter code: ${code}</p><input id="codeInput"><button onclick="checkCode('${code}',room)">Submit</button>`;
+  }
+  
+  if(room.taskType==="switches"){
+    for(let i=0;i<5;i++){
+      content.innerHTML+=`<button id="sw${i}" onclick="toggleSwitch(${i})">OFF</button> `;
+    }
+    content.innerHTML+=`<br><button onclick="checkSwitches(room)">Submit</button>`;
+  }
+  
+  if(room.taskType==="wires"){
+    let colors=["red","blue","green","yellow"];
+    content.innerHTML="<p>Drag wires to match colors</p>";
+    colors.forEach(c=>{
+      content.innerHTML+=`<div draggable="true" ondragstart="drag(event)" id="${c}Left" style="color:${c};">${c} wire (left)</div>`;
+    });
+    colors.forEach(c=>{
+      content.innerHTML+=`<div ondrop="drop(event,'${c}',room)" ondragover="allowDrop(event)" style="color:${c};border:1px solid #0ff;margin:5px;">${c} target</div>`;
+    });
+    window.matched=0;
+  }
+}
+
+function checkCode(code,room){
+  if(document.getElementById("codeInput").value===code){finishTask(room);}
+  else alert("Wrong code!");
+}
+
+function toggleSwitch(i){
+  let btn=document.getElementById("sw"+i);
+  if(btn.textContent==="OFF"){btn.textContent="ON";btn.style.color="#0f0";}
+  else {btn.textContent="OFF";btn.style.color="#f00";}
+}
+
+function checkSwitches(room){
+  let all=true;
+  for(let i=0;i<5;i++){if(document.getElementById("sw"+i).textContent!=="ON")all=false;}
+  if(all)finishTask(room); else alert("Not all switches on!");
+}
+
+// --- Wires drag/drop ---
+function allowDrop(ev){ev.preventDefault();}
+function drag(ev){ev.dataTransfer.setData("text",ev.target.id);}
+function drop(ev,color,room){
+  ev.preventDefault();
+  let data=ev.dataTransfer.getData("text");
+  if(data.includes(color)){
+    ev.target.textContent="Connected!";
+    window.matched++;
+    if(window.matched===4){finishTask(room);}
+  } else {
+    alert("Wrong wire!");
+  }
+}
+
+function finishTask(room){
+  room.task=false;tasksDone++;
+  alert("Task complete!");
+  closeTask();
+  if(tasksDone===rooms.filter(r=>r.taskType).length){alert("All tasks done! Crew wins!");reset();}
+}
+function closeTask(){document.getElementById("taskOverlay").style.display="none";}
+
+// Controls
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowUp")player.y-=10
